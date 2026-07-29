@@ -20,6 +20,9 @@ export default function ConfirmHintModal({ loading, onConfirm, onDismiss }: Conf
       <p className="dialog-copy">
         Chủ phòng sẽ biết tên đội và thời điểm bạn mở gợi ý theo giờ UTC+7.
       </p>
+      <p className="hint-cost-note">
+        Mua gợi ý = 2 con dấu
+      </p>
       <div className="dialog-actions">
         <button type="button" className="btn-secondary" onClick={onDismiss} disabled={loading}>
           Chưa cần

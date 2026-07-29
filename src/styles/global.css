@@ -858,6 +858,19 @@ a:focus-visible {
   line-height: 1.65;
 }
 
+.hint-cost-note {
+  width: fit-content;
+  margin: 14px auto 0;
+  padding: 8px 14px;
+  color: var(--warm-400);
+  background: rgba(255, 201, 107, 0.09);
+  border: 1px solid rgba(255, 201, 107, 0.34);
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
 .dialog-actions {
   display: flex;
   flex-wrap: wrap;
