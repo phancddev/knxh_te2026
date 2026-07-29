@@ -5,16 +5,22 @@ interface QuizCardProps {
   question: Question
   answer: string
   status: AnswerStatus
+  submitting: boolean
+  hintRevealed: boolean
   onAnswerChange: (answer: string) => void
   onSubmit: () => void
+  onRequestHint: () => void
 }
 
 export default function QuizCard({
   question,
   answer,
   status,
+  submitting,
+  hintRevealed,
   onAnswerChange,
   onSubmit,
+  onRequestHint,
 }: QuizCardProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -72,8 +78,8 @@ export default function QuizCard({
             aria-describedby="answer-help answer-error"
             aria-invalid={status === 'incorrect'}
           />
-          <button type="submit" className="answer-submit" disabled={!answer.trim()}>
-            Mở khóa
+          <button type="submit" className="answer-submit" disabled={!answer.trim() || submitting}>
+            {submitting ? 'Đang kiểm tra...' : 'Mở khóa'}
           </button>
         </div>
 
@@ -92,6 +98,21 @@ export default function QuizCard({
             : ''}
         </p>
       </form>
+
+      <div className="hint-action">
+        <span aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c1 .7 1 1.3 1 2.3h6c0-1 .1-1.6 1-2.3A7 7 0 0 0 12 2Z" />
+          </svg>
+        </span>
+        <div>
+          <strong>{hintRevealed ? 'Gợi ý đã được mở khóa' : 'Bạn đang mắc kẹt?'}</strong>
+          <small>{hintRevealed ? 'Có thể xem lại mà không ghi thêm nhật ký.' : 'Mở một phần nhỏ của hình bí mật.'}</small>
+        </div>
+        <button type="button" className="btn-secondary compact-btn" onClick={onRequestHint}>
+          {hintRevealed ? 'Xem lại gợi ý' : 'Cần gợi ý'}
+        </button>
+      </div>
     </section>
   )
 }

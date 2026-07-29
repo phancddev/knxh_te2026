@@ -1,30 +1,61 @@
 # Rừng Tri Thức
 
-Ứng dụng câu đố tương tác xây dựng bằng React, TypeScript và Vite.
+Hệ thống câu đố nhiều phòng gồm:
 
-## Chạy local
+- Chủ phòng tạo phòng và đăng nhập lại bằng tài khoản riêng.
+- Mỗi đội đăng ký hoặc đăng nhập lại từ link mời.
+- Chủ phòng theo dõi đội tham gia và nhật ký mở gợi ý theo giờ UTC+7.
+- Đáp án, alias và ảnh đầy đủ chỉ do backend xử lý.
+- SQLite được lưu trong Docker volume nên dữ liệu không mất khi restart container.
+
+## Chạy toàn bộ hệ thống bằng Docker
+
+Tạo file cấu hình:
+
+```bash
+cp .env.example .env
+```
+
+Điền `JWT_SECRET` tối thiểu 32 ký tự và đáp án bí mật. Backend chỉ không phân
+biệt chữ hoa/chữ thường; mọi biến thể khác đều bị từ chối.
+Sau đó chạy:
+
+```bash
+docker compose up --build -d
+```
+
+Mở `http://localhost:8080`. Đổi cổng bằng `APP_PORT` trong `.env`.
+
+Kiểm tra trạng thái:
+
+```bash
+docker compose ps
+docker compose logs -f
+```
+
+Dừng hệ thống mà vẫn giữ dữ liệu:
+
+```bash
+docker compose down
+```
+
+Chỉ dùng `docker compose down -v` khi muốn xóa toàn bộ phòng, đội và nhật ký.
+
+## Phát triển local
+
+Backend:
+
+```bash
+cd server
+npm ci
+npm start
+```
+
+Frontend ở terminal khác:
 
 ```bash
 npm ci
 npm run dev
 ```
 
-## Build production
-
-```bash
-npm run build
-```
-
-## Docker
-
-```bash
-docker build -t knxh-quiz .
-docker run --rm -p 8080:80 knxh-quiz
-```
-
-## GitHub Pages
-
-Mỗi lần push lên branch `main`, workflow
-[`deploy-pages.yml`](.github/workflows/deploy-pages.yml) sẽ build và triển khai ứng dụng tại:
-
-https://phancddev.github.io/knxh_te2026/
+Vite sẽ proxy `/api` tới backend ở cổng `3000`.
