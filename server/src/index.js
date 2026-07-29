@@ -28,7 +28,14 @@ const db = await createDatabase(databaseUrl)
 const app = express()
 
 app.set('trust proxy', 1)
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'same-origin' } }))
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      imgSrc: ["'self'", 'data:', 'blob:'],
+    },
+  },
+  crossOriginResourcePolicy: { policy: 'same-origin' },
+}))
 app.use(express.json({ limit: '32kb' }))
 
 const authLimiter = rateLimit({
