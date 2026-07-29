@@ -1,48 +1,66 @@
-import fs from 'node:fs'
-import path from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import pg from 'pg'
 
-export function createDatabase(filename) {
-  fs.mkdirSync(path.dirname(filename), { recursive: true })
-  const db = new DatabaseSync(filename)
+const { Pool } = pg
 
-  db.exec('PRAGMA journal_mode = WAL')
-  db.exec('PRAGMA foreign_keys = ON')
-  db.exec(`
+export async function createDatabase(connectionString) {
+  if (!connectionString) {
+    throw new Error('DATABASE_URL must be configured')
+  }
+
+  const sslSetting = process.env.DATABASE_SSL?.toLowerCase()
+  const ssl = sslSetting === 'true'
+    ? { rejectUnauthorized: false }
+    : sslSetting === 'false'
+      ? false
+      : undefined
+
+  const pool = new Pool({
+    connectionString,
+    ssl,
+    max: Number(process.env.DATABASE_POOL_SIZE || 10),
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
+  })
+
+  pool.on('error', (error) => {
+    console.error('Unexpected PostgreSQL pool error', error)
+  })
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS rooms (
-      id TEXT PRIMARY KEY,
+      id UUID PRIMARY KEY,
       code TEXT NOT NULL UNIQUE,
       name TEXT NOT NULL,
       owner_username TEXT NOT NULL,
       owner_username_key TEXT NOT NULL,
       owner_password_hash TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TIMESTAMPTZ NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS teams (
-      id TEXT PRIMARY KEY,
-      room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+      id UUID PRIMARY KEY,
+      room_id UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       username TEXT NOT NULL,
       username_key TEXT NOT NULL,
       password_hash TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      hint_revealed_at TEXT,
-      solved_at TEXT,
+      created_at TIMESTAMPTZ NOT NULL,
+      hint_revealed_at TIMESTAMPTZ,
+      solved_at TIMESTAMPTZ,
       UNIQUE(room_id, username_key),
       UNIQUE(room_id, name)
     );
 
     CREATE TABLE IF NOT EXISTS hint_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-      team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
-      occurred_at TEXT NOT NULL
+      id SERIAL PRIMARY KEY,
+      room_id UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+      team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      occurred_at TIMESTAMPTZ NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_teams_room ON teams(room_id);
     CREATE INDEX IF NOT EXISTS idx_hint_logs_room ON hint_logs(room_id, occurred_at DESC);
   `)
 
-  return db
+  return pool
 }

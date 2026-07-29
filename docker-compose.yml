@@ -1,17 +1,39 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-knxh}
+      POSTGRES_USER: ${POSTGRES_USER:-knxh}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-knxh} -d ${POSTGRES_DB:-knxh}
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 10
+
   backend:
     build:
       context: .
       dockerfile: server/Dockerfile
     env_file:
       - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       PORT: 3000
-      DATABASE_PATH: /app/data/quiz.sqlite
+      DATABASE_URL: postgresql://${POSTGRES_USER:-knxh}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-knxh}
+      DATABASE_SSL: "false"
       HINT_IMAGE_PATH: /app/assets/goiygoc.jpeg
       REWARD_IMAGE_PATH: /app/assets/goiy.jpeg
-    volumes:
-      - quiz-data:/app/data
     restart: unless-stopped
     healthcheck:
       test:
@@ -36,4 +58,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  quiz-data:
+  postgres-data:

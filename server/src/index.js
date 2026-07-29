@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import bcrypt from 'bcryptjs'
@@ -11,7 +12,8 @@ import { createDatabase } from './database.js'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 const port = Number(process.env.PORT || 3000)
-const databasePath = process.env.DATABASE_PATH || path.resolve(dirname, '../data/quiz.sqlite')
+const databaseUrl = process.env.DATABASE_URL
+const staticDirectory = process.env.STATIC_DIR || path.resolve(dirname, '../public')
 const hintImagePath = process.env.HINT_IMAGE_PATH || path.resolve(dirname, '../assets/goiygoc.jpeg')
 const rewardImagePath = process.env.REWARD_IMAGE_PATH || path.resolve(dirname, '../assets/goiy.jpeg')
 const jwtSecret = process.env.JWT_SECRET
@@ -22,7 +24,7 @@ if (!jwtSecret || jwtSecret.length < 32) {
 }
 
 const checkAnswer = createAnswerChecker(quizAnswer)
-const db = createDatabase(databasePath)
+const db = await createDatabase(databaseUrl)
 const app = express()
 
 app.set('trust proxy', 1)
@@ -51,10 +53,10 @@ function validateCredentials(username, password) {
   return null
 }
 
-function createRoomCode() {
+async function createRoomCode() {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const code = crypto.randomBytes(5).toString('base64url').toUpperCase()
-    const exists = db.prepare('SELECT 1 FROM rooms WHERE code = ?').get(code)
+    const exists = (await db.query('SELECT 1 FROM rooms WHERE code = $1', [code])).rows[0]
     if (!exists) return code
   }
   throw new Error('Could not generate a unique room code')
@@ -107,7 +109,7 @@ app.post('/api/rooms', authLimiter, async (request, response, next) => {
 
     const room = {
       id: crypto.randomUUID(),
-      code: createRoomCode(),
+      code: await createRoomCode(),
       name,
       username,
       usernameKey: usernameKey(username),
@@ -115,11 +117,11 @@ app.post('/api/rooms', authLimiter, async (request, response, next) => {
       createdAt: new Date().toISOString(),
     }
 
-    db.prepare(`
+    await db.query(`
       INSERT INTO rooms (
         id, code, name, owner_username, owner_username_key, owner_password_hash, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `, [
       room.id,
       room.code,
       room.name,
@@ -127,7 +129,7 @@ app.post('/api/rooms', authLimiter, async (request, response, next) => {
       room.usernameKey,
       room.passwordHash,
       room.createdAt,
-    )
+    ])
 
     response.status(201).json({
       token: signSession({ role: 'owner', roomId: room.id, username: room.username }),
@@ -143,9 +145,10 @@ app.post('/api/rooms/login', authLimiter, async (request, response, next) => {
     const code = cleanText(request.body.roomCode, 20).toUpperCase()
     const username = cleanText(request.body.username, 40)
     const password = String(request.body.password ?? '')
-    const room = db.prepare(
-      'SELECT * FROM rooms WHERE code = ? AND owner_username_key = ?',
-    ).get(code, usernameKey(username))
+    const room = (await db.query(
+      'SELECT * FROM rooms WHERE code = $1 AND owner_username_key = $2',
+      [code, usernameKey(username)],
+    )).rows[0]
 
     if (!room || !(await bcrypt.compare(password, room.owner_password_hash))) {
       return response.status(401).json({ error: 'Mã phòng, tên đăng nhập hoặc mật khẩu không đúng.' })
@@ -160,19 +163,24 @@ app.post('/api/rooms/login', authLimiter, async (request, response, next) => {
   }
 })
 
-app.get('/api/rooms/:code', (request, response) => {
-  const room = db.prepare(
-    'SELECT code, name, created_at FROM rooms WHERE code = ?',
-  ).get(cleanText(request.params.code, 20).toUpperCase())
+app.get('/api/rooms/:code', async (request, response, next) => {
+  try {
+    const room = (await db.query(
+      'SELECT code, name, created_at FROM rooms WHERE code = $1',
+      [cleanText(request.params.code, 20).toUpperCase()],
+    )).rows[0]
 
-  if (!room) return response.status(404).json({ error: 'Không tìm thấy phòng này.' })
-  response.json({ room: serializeRoom(room) })
+    if (!room) return response.status(404).json({ error: 'Không tìm thấy phòng này.' })
+    response.json({ room: serializeRoom(room) })
+  } catch (error) {
+    next(error)
+  }
 })
 
 app.post('/api/rooms/:code/teams', authLimiter, async (request, response, next) => {
   try {
     const code = cleanText(request.params.code, 20).toUpperCase()
-    const room = db.prepare('SELECT * FROM rooms WHERE code = ?').get(code)
+    const room = (await db.query('SELECT * FROM rooms WHERE code = $1', [code])).rows[0]
     if (!room) return response.status(404).json({ error: 'Không tìm thấy phòng này.' })
 
     const name = cleanText(request.body.name, 60)
@@ -192,11 +200,11 @@ app.post('/api/rooms/:code/teams', authLimiter, async (request, response, next) 
     }
 
     try {
-      db.prepare(`
+      await db.query(`
         INSERT INTO teams (
           id, room_id, name, username, username_key, password_hash, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [
         team.id,
         room.id,
         team.name,
@@ -204,9 +212,9 @@ app.post('/api/rooms/:code/teams', authLimiter, async (request, response, next) 
         team.usernameKey,
         team.passwordHash,
         team.createdAt,
-      )
+      ])
     } catch (error) {
-      if (String(error.message).includes('UNIQUE constraint failed')) {
+      if (error.code === '23505') {
         return response.status(409).json({ error: 'Tên đội hoặc tên đăng nhập đã được dùng trong phòng.' })
       }
       throw error
@@ -233,11 +241,11 @@ app.post('/api/rooms/:code/teams/login', authLimiter, async (request, response, 
     const code = cleanText(request.params.code, 20).toUpperCase()
     const username = cleanText(request.body.username, 40)
     const password = String(request.body.password ?? '')
-    const team = db.prepare(`
+    const team = (await db.query(`
       SELECT teams.*, rooms.code, rooms.name AS room_name, rooms.created_at AS room_created_at
       FROM teams JOIN rooms ON rooms.id = teams.room_id
-      WHERE rooms.code = ? AND teams.username_key = ?
-    `).get(code, usernameKey(username))
+      WHERE rooms.code = $1 AND teams.username_key = $2
+    `, [code, usernameKey(username)])).rows[0]
 
     if (!team || !(await bcrypt.compare(password, team.password_hash))) {
       return response.status(401).json({ error: 'Tên đăng nhập hoặc mật khẩu của đội không đúng.' })
@@ -259,100 +267,131 @@ app.post('/api/rooms/:code/teams/login', authLimiter, async (request, response, 
   }
 })
 
-app.get('/api/session', requireAuth(), (request, response) => {
-  if (request.session.role === 'owner') {
-    const room = db.prepare('SELECT * FROM rooms WHERE id = ?').get(request.session.roomId)
-    if (!room) return response.status(401).json({ error: 'Phòng không còn tồn tại.' })
-    return response.json({ role: 'owner', room: serializeRoom(room) })
-  }
-
-  const team = db.prepare(`
-    SELECT teams.*, rooms.code, rooms.name AS room_name, rooms.created_at AS room_created_at
-    FROM teams JOIN rooms ON rooms.id = teams.room_id
-    WHERE teams.id = ? AND rooms.id = ?
-  `).get(request.session.teamId, request.session.roomId)
-
-  if (!team) return response.status(401).json({ error: 'Đội không còn tồn tại.' })
-  response.json({
-    role: 'team',
-    room: { code: team.code, name: team.room_name, createdAt: team.room_created_at },
-    team: { name: team.name, username: team.username },
-    state: { hintRevealed: Boolean(team.hint_revealed_at), solved: Boolean(team.solved_at) },
-  })
-})
-
-app.get('/api/owner/dashboard', requireAuth('owner'), (request, response) => {
-  const room = db.prepare('SELECT * FROM rooms WHERE id = ?').get(request.session.roomId)
-  if (!room) return response.status(404).json({ error: 'Không tìm thấy phòng.' })
-
-  const teams = db.prepare(`
-    SELECT id, name, username, created_at, hint_revealed_at, solved_at
-    FROM teams WHERE room_id = ? ORDER BY created_at ASC
-  `).all(room.id).map((team) => ({
-    id: team.id,
-    name: team.name,
-    username: team.username,
-    createdAt: team.created_at,
-    hintRevealedAt: team.hint_revealed_at,
-    solvedAt: team.solved_at,
-  }))
-
-  const hintLogs = db.prepare(`
-    SELECT hint_logs.id, hint_logs.occurred_at, teams.name AS team_name, teams.username
-    FROM hint_logs JOIN teams ON teams.id = hint_logs.team_id
-    WHERE hint_logs.room_id = ? ORDER BY hint_logs.occurred_at DESC
-  `).all(room.id).map((log) => ({
-    id: log.id,
-    teamName: log.team_name,
-    username: log.username,
-    occurredAt: log.occurred_at,
-  }))
-
-  response.json({ room: serializeRoom(room), teams, hintLogs })
-})
-
-app.post('/api/team/hint', requireAuth('team'), (request, response) => {
-  const team = db.prepare(
-    'SELECT hint_revealed_at FROM teams WHERE id = ? AND room_id = ?',
-  ).get(request.session.teamId, request.session.roomId)
-  if (!team) return response.status(404).json({ error: 'Không tìm thấy đội.' })
-
-  if (!team.hint_revealed_at) {
-    const occurredAt = new Date().toISOString()
-    try {
-      db.exec('BEGIN IMMEDIATE')
-      db.prepare('UPDATE teams SET hint_revealed_at = ? WHERE id = ?').run(occurredAt, request.session.teamId)
-      db.prepare(
-        'INSERT INTO hint_logs (room_id, team_id, occurred_at) VALUES (?, ?, ?)',
-      ).run(request.session.roomId, request.session.teamId, occurredAt)
-      db.exec('COMMIT')
-    } catch (error) {
-      db.exec('ROLLBACK')
-      throw error
+app.get('/api/session', requireAuth(), async (request, response, next) => {
+  try {
+    if (request.session.role === 'owner') {
+      const room = (await db.query(
+        'SELECT * FROM rooms WHERE id = $1',
+        [request.session.roomId],
+      )).rows[0]
+      if (!room) return response.status(401).json({ error: 'Phòng không còn tồn tại.' })
+      return response.json({ role: 'owner', room: serializeRoom(room) })
     }
-  }
 
-  response.json({ hintRevealed: true, imageUrl: '/api/team/hint-image' })
+    const team = (await db.query(`
+      SELECT teams.*, rooms.code, rooms.name AS room_name, rooms.created_at AS room_created_at
+      FROM teams JOIN rooms ON rooms.id = teams.room_id
+      WHERE teams.id = $1 AND rooms.id = $2
+    `, [request.session.teamId, request.session.roomId])).rows[0]
+
+    if (!team) return response.status(401).json({ error: 'Đội không còn tồn tại.' })
+    response.json({
+      role: 'team',
+      room: { code: team.code, name: team.room_name, createdAt: team.room_created_at },
+      team: { name: team.name, username: team.username },
+      state: { hintRevealed: Boolean(team.hint_revealed_at), solved: Boolean(team.solved_at) },
+    })
+  } catch (error) {
+    next(error)
+  }
 })
 
-app.post('/api/team/answer', requireAuth('team'), (request, response) => {
-  const answer = String(request.body.answer ?? '').slice(0, 160)
-  if (!answer) return response.status(400).json({ error: 'Vui lòng nhập đáp án.' })
+app.get('/api/owner/dashboard', requireAuth('owner'), async (request, response, next) => {
+  try {
+    const room = (await db.query(
+      'SELECT * FROM rooms WHERE id = $1',
+      [request.session.roomId],
+    )).rows[0]
+    if (!room) return response.status(404).json({ error: 'Không tìm thấy phòng.' })
 
-  const correct = checkAnswer(answer)
-  if (!correct) return response.json({ correct: false })
+    const teams = (await db.query(`
+      SELECT id, name, username, created_at, hint_revealed_at, solved_at
+      FROM teams WHERE room_id = $1 ORDER BY created_at ASC
+    `, [room.id])).rows.map((team) => ({
+      id: team.id,
+      name: team.name,
+      username: team.username,
+      createdAt: team.created_at,
+      hintRevealedAt: team.hint_revealed_at,
+      solvedAt: team.solved_at,
+    }))
 
-  db.prepare(`
-    UPDATE teams SET solved_at = COALESCE(solved_at, ?) WHERE id = ? AND room_id = ?
-  `).run(new Date().toISOString(), request.session.teamId, request.session.roomId)
+    const hintLogs = (await db.query(`
+      SELECT hint_logs.id, hint_logs.occurred_at, teams.name AS team_name, teams.username
+      FROM hint_logs JOIN teams ON teams.id = hint_logs.team_id
+      WHERE hint_logs.room_id = $1 ORDER BY hint_logs.occurred_at DESC
+    `, [room.id])).rows.map((log) => ({
+      id: log.id,
+      teamName: log.team_name,
+      username: log.username,
+      occurredAt: log.occurred_at,
+    }))
 
-  response.json({ correct: true, imageUrl: '/api/team/reward-image' })
+    response.json({ room: serializeRoom(room), teams, hintLogs })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/team/hint', requireAuth('team'), async (request, response, next) => {
+  const client = await db.connect()
+  try {
+    await client.query('BEGIN')
+    const team = (await client.query(
+      'SELECT hint_revealed_at FROM teams WHERE id = $1 AND room_id = $2 FOR UPDATE',
+      [request.session.teamId, request.session.roomId],
+    )).rows[0]
+    if (!team) {
+      await client.query('ROLLBACK')
+      return response.status(404).json({ error: 'Không tìm thấy đội.' })
+    }
+
+    if (!team.hint_revealed_at) {
+      const occurredAt = new Date().toISOString()
+      await client.query(
+        'UPDATE teams SET hint_revealed_at = $1 WHERE id = $2',
+        [occurredAt, request.session.teamId],
+      )
+      await client.query(
+        'INSERT INTO hint_logs (room_id, team_id, occurred_at) VALUES ($1, $2, $3)',
+        [request.session.roomId, request.session.teamId, occurredAt],
+      )
+    }
+    await client.query('COMMIT')
+    response.json({ hintRevealed: true, imageUrl: '/api/team/hint-image' })
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK')
+    } catch {}
+    next(error)
+  } finally {
+    client.release()
+  }
+})
+
+app.post('/api/team/answer', requireAuth('team'), async (request, response, next) => {
+  try {
+    const answer = String(request.body.answer ?? '').slice(0, 160)
+    if (!answer) return response.status(400).json({ error: 'Vui lòng nhập đáp án.' })
+
+    const correct = checkAnswer(answer)
+    if (!correct) return response.json({ correct: false })
+
+    await db.query(`
+      UPDATE teams SET solved_at = COALESCE(solved_at, $1) WHERE id = $2 AND room_id = $3
+    `, [new Date().toISOString(), request.session.teamId, request.session.roomId])
+
+    response.json({ correct: true, imageUrl: '/api/team/reward-image' })
+  } catch (error) {
+    next(error)
+  }
 })
 
 async function sendProtectedImage(request, response, mode) {
-  const team = db.prepare(
-    'SELECT hint_revealed_at, solved_at FROM teams WHERE id = ? AND room_id = ?',
-  ).get(request.session.teamId, request.session.roomId)
+  const team = (await db.query(
+    'SELECT hint_revealed_at, solved_at FROM teams WHERE id = $1 AND room_id = $2',
+    [request.session.teamId, request.session.roomId],
+  )).rows[0]
   const allowed = mode === 'full' ? team?.solved_at : (team?.hint_revealed_at || team?.solved_at)
   if (!allowed) return response.status(403).json({ error: 'Ảnh này chưa được mở khóa.' })
 
@@ -373,11 +412,36 @@ app.get('/api/team/reward-image', requireAuth('team'), (request, response, next)
   sendProtectedImage(request, response, 'full').catch(next)
 })
 
+app.use('/api', (_request, response) => {
+  response.status(404).json({ error: 'Không tìm thấy API này.' })
+})
+
+if (fs.existsSync(path.join(staticDirectory, 'index.html'))) {
+  app.use(express.static(staticDirectory, {
+    index: false,
+    maxAge: '7d',
+  }))
+  app.use((request, response, next) => {
+    if (request.method !== 'GET') return next()
+    response.sendFile(path.join(staticDirectory, 'index.html'))
+  })
+}
+
 app.use((error, _request, response, _next) => {
   console.error(error)
   response.status(500).json({ error: 'Máy chủ gặp sự cố. Vui lòng thử lại.' })
 })
 
-app.listen(port, '0.0.0.0', () => {
+const server = app.listen(port, '0.0.0.0', () => {
   console.log(`KNXH API listening on port ${port}`)
 })
+
+async function shutdown() {
+  server.close(async () => {
+    await db.end()
+    process.exit(0)
+  })
+}
+
+process.on('SIGTERM', shutdown)
+process.on('SIGINT', shutdown)
