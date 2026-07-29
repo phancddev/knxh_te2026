@@ -1845,6 +1845,20 @@ input:focus-visible {
   font-size: 0.66rem;
 }
 
+.team-status {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.team-solved-time {
+  color: rgba(184, 216, 220, 0.78);
+  font-size: 0.61rem;
+  line-height: 1.35;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -1992,6 +2006,11 @@ input:focus-visible {
 
   .team-status {
     grid-column: 2;
+    justify-items: start;
+  }
+
+  .team-solved-time {
+    text-align: left;
   }
 
   .reward-visual {

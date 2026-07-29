@@ -7,12 +7,20 @@ interface OwnerDashboardProps {
 }
 
 function formatUtc7(value: string) {
-  return new Intl.DateTimeFormat('vi-VN', {
+  const parts = new Intl.DateTimeFormat('vi-VN', {
     timeZone: 'Asia/Ho_Chi_Minh',
-    dateStyle: 'medium',
-    timeStyle: 'medium',
-    hour12: false,
-  }).format(new Date(value))
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(value))
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value ?? ''
+
+  return `${part('day')}/${part('month')}/${part('year')} ${part('hour')}:${part('minute')}:${part('second')}`
 }
 
 export default function OwnerDashboard({ room, onLogout }: OwnerDashboardProps) {
@@ -94,7 +102,12 @@ export default function OwnerDashboard({ room, onLogout }: OwnerDashboardProps) 
                   </div>
                   <div className="team-status">
                     {team.solvedAt ? (
-                      <span className="status-pill status-pill--solved">Đã giải đúng</span>
+                      <>
+                        <span className="status-pill status-pill--solved">Đã giải đúng</span>
+                        <time className="team-solved-time" dateTime={team.solvedAt}>
+                          {formatUtc7(team.solvedAt)} (UTC+7)
+                        </time>
+                      </>
                     ) : team.hintRevealedAt ? (
                       <span className="status-pill status-pill--hint">Đã xem gợi ý</span>
                     ) : (
