@@ -103,6 +103,13 @@ export default function TeamGame({ room, team, initialState, onLogout }: TeamGam
         <button type="button" className="text-button" onClick={onLogout}>Đăng xuất</button>
       </div>
 
+      {room.isTesting && (
+        <div className="testing-room-banner" role="status">
+          <strong>Phòng hướng dẫn</strong>
+          <span>Ảnh thật đang được ẩn. Dùng đáp án thử: <code>test</code></span>
+        </div>
+      )}
+
       {notice && <p className="floating-notice" role="alert">{notice}</p>}
 
       <div className="quiz-transition">
@@ -134,6 +141,7 @@ export default function TeamGame({ room, team, initialState, onLogout }: TeamGam
       {hintImage && (
         <HintModal
           imageUrl={hintImage}
+          testing={room.isTesting}
           onDismiss={() => {
             URL.revokeObjectURL(hintImage)
             setHintImage('')
@@ -143,6 +151,7 @@ export default function TeamGame({ room, team, initialState, onLogout }: TeamGam
       {showReward && rewardImage && (
         <FeedbackOverlay
           imageUrl={rewardImage}
+          testing={room.isTesting}
           onContinue={() => setShowReward(false)}
           continueLabel="Trở lại màn chơi"
         />

@@ -2,6 +2,7 @@ export interface Room {
   code: string
   name: string
   createdAt: string
+  isTesting: boolean
 }
 
 export interface Team {
@@ -75,7 +76,7 @@ export const api = {
     return request<{ room: Room }>(`/api/rooms/${encodeURIComponent(code)}`)
   },
 
-  createRoom(data: { name: string; username: string; password: string }) {
+  createRoom(data: { name: string; username: string; password: string; isTesting: boolean }) {
     return request<{ token: string; room: Room }>('/api/rooms', {
       method: 'POST',
       body: JSON.stringify(data),

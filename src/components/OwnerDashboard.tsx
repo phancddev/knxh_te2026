@@ -56,7 +56,8 @@ export default function OwnerDashboard({ room, onLogout }: OwnerDashboardProps) 
         <div>
           <p className="question-kicker">Bảng điều khiển chủ phòng</p>
           <h1 id="dashboard-title">{room.name}</h1>
-          <p>Mã phòng <strong>{room.code}</strong></p>
+          <p className="dashboard-room-code">Mã phòng <strong>{room.code}</strong></p>
+          {room.isTesting && <span className="testing-room-badge">Chế độ hướng dẫn / testing</span>}
         </div>
         <button type="button" className="btn-secondary compact-btn" onClick={onLogout}>
           Đăng xuất

@@ -34,8 +34,12 @@ export async function createDatabase(connectionString) {
       owner_username TEXT NOT NULL,
       owner_username_key TEXT NOT NULL,
       owner_password_hash TEXT NOT NULL,
+      is_testing BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL
     );
+
+    ALTER TABLE rooms
+      ADD COLUMN IF NOT EXISTS is_testing BOOLEAN NOT NULL DEFAULT FALSE;
 
     CREATE TABLE IF NOT EXISTS teams (
       id UUID PRIMARY KEY,

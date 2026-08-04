@@ -6,6 +6,7 @@ Hệ thống câu đố nhiều phòng gồm:
 - Mỗi đội đăng ký hoặc đăng nhập lại từ link mời.
 - Chủ phòng theo dõi đội tham gia và nhật ký mở gợi ý theo giờ UTC+7.
 - Đáp án và ảnh đầy đủ chỉ do backend xử lý.
+- Có chế độ hướng dẫn/testing dùng đáp án `test` và ảnh placeholder, không trả ảnh trò chơi thật.
 - PostgreSQL được lưu trong Docker volume nên dữ liệu không mất khi restart container.
 
 ## Chạy toàn bộ hệ thống bằng Docker

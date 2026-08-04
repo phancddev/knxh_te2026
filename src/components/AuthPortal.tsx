@@ -35,6 +35,7 @@ export default function AuthPortal({ onAuthenticated }: AuthPortalProps) {
   const [room, setRoom] = useState<Room | null>(null)
   const [mode, setMode] = useState<PublicMode>(inviteCode ? 'join-team' : 'create-room')
   const [roomName, setRoomName] = useState('')
+  const [isTesting, setIsTesting] = useState(false)
   const [roomCode, setRoomCode] = useState(inviteCode)
   const [teamName, setTeamName] = useState('')
   const [username, setUsername] = useState('')
@@ -63,7 +64,7 @@ export default function AuthPortal({ onAuthenticated }: AuthPortalProps) {
 
     try {
       if (mode === 'create-room') {
-        const result = await api.createRoom({ name: roomName, username, password })
+        const result = await api.createRoom({ name: roomName, username, password, isTesting })
         saveToken(result.token)
         onAuthenticated({ role: 'owner', room: result.room })
       } else if (mode === 'owner-login') {
@@ -115,6 +116,7 @@ export default function AuthPortal({ onAuthenticated }: AuthPortalProps) {
           <span>Mã phòng</span>
           <strong>{inviteCode}</strong>
           <small>{room?.name || 'Đang tìm phòng...'}</small>
+          {room?.isTesting && <em>Phòng hướng dẫn</em>}
         </div>
       )}
 
@@ -165,16 +167,33 @@ export default function AuthPortal({ onAuthenticated }: AuthPortalProps) {
 
       <form className="portal-form" onSubmit={handleSubmit}>
         {mode === 'create-room' && (
-          <label>
-            <span>Tên phòng</span>
-            <input
-              value={roomName}
-              onChange={(event) => setRoomName(event.target.value)}
-              placeholder="Ví dụ: Hành trình mùa hè"
-              maxLength={60}
-              autoFocus
-            />
-          </label>
+          <>
+            <label>
+              <span>Tên phòng</span>
+              <input
+                value={roomName}
+                onChange={(event) => setRoomName(event.target.value)}
+                placeholder="Ví dụ: Hành trình mùa hè"
+                maxLength={60}
+                autoFocus
+              />
+            </label>
+
+            <label className={`testing-mode-option${isTesting ? ' testing-mode-option--active' : ''}`}>
+              <input
+                type="checkbox"
+                checked={isTesting}
+                onChange={(event) => setIsTesting(event.target.checked)}
+              />
+              <span className="testing-mode-control" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg>
+              </span>
+              <span className="testing-mode-copy">
+                <strong>Chế độ hướng dẫn / testing</strong>
+                <small>Dùng ảnh minh họa và đáp án thử, không làm lộ nội dung trò chơi thật.</small>
+              </span>
+            </label>
+          </>
         )}
 
         {mode === 'owner-login' && (

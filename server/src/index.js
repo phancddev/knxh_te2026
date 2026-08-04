@@ -9,6 +9,7 @@ import helmet from 'helmet'
 import jwt from 'jsonwebtoken'
 import { createAnswerChecker, normalizeVietnamese } from './answer.js'
 import { createDatabase } from './database.js'
+import { checkTestingAnswer, createTestingPlaceholder } from './testingMode.js'
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 const port = Number(process.env.PORT || 3000)
@@ -99,7 +100,12 @@ function requireAuth(role) {
 }
 
 function serializeRoom(room) {
-  return { code: room.code, name: room.name, createdAt: room.created_at }
+  return {
+    code: room.code,
+    name: room.name,
+    createdAt: room.created_at,
+    isTesting: Boolean(room.is_testing),
+  }
 }
 
 app.get('/health', (_request, response) => {
@@ -111,6 +117,7 @@ app.post('/api/rooms', authLimiter, async (request, response, next) => {
     const name = cleanText(request.body.name, 60) || 'Phòng Rừng Tri Thức'
     const username = cleanText(request.body.username, 40)
     const password = String(request.body.password ?? '')
+    const isTesting = request.body.isTesting === true
     const credentialError = validateCredentials(username, password)
     if (credentialError) return response.status(400).json({ error: credentialError })
 
@@ -121,13 +128,14 @@ app.post('/api/rooms', authLimiter, async (request, response, next) => {
       username,
       usernameKey: usernameKey(username),
       passwordHash: await bcrypt.hash(password, 12),
+      isTesting,
       createdAt: new Date().toISOString(),
     }
 
     await db.query(`
       INSERT INTO rooms (
-        id, code, name, owner_username, owner_username_key, owner_password_hash, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        id, code, name, owner_username, owner_username_key, owner_password_hash, is_testing, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     `, [
       room.id,
       room.code,
@@ -135,12 +143,18 @@ app.post('/api/rooms', authLimiter, async (request, response, next) => {
       room.username,
       room.usernameKey,
       room.passwordHash,
+      room.isTesting,
       room.createdAt,
     ])
 
     response.status(201).json({
       token: signSession({ role: 'owner', roomId: room.id, username: room.username }),
-      room: { code: room.code, name: room.name, createdAt: room.createdAt },
+      room: {
+        code: room.code,
+        name: room.name,
+        createdAt: room.createdAt,
+        isTesting: room.isTesting,
+      },
     })
   } catch (error) {
     next(error)
@@ -173,7 +187,7 @@ app.post('/api/rooms/login', authLimiter, async (request, response, next) => {
 app.get('/api/rooms/:code', async (request, response, next) => {
   try {
     const room = (await db.query(
-      'SELECT code, name, created_at FROM rooms WHERE code = $1',
+      'SELECT code, name, is_testing, created_at FROM rooms WHERE code = $1',
       [cleanText(request.params.code, 20).toUpperCase()],
     )).rows[0]
 
@@ -249,7 +263,8 @@ app.post('/api/rooms/:code/teams/login', authLimiter, async (request, response, 
     const username = cleanText(request.body.username, 40)
     const password = String(request.body.password ?? '')
     const team = (await db.query(`
-      SELECT teams.*, rooms.code, rooms.name AS room_name, rooms.created_at AS room_created_at
+      SELECT teams.*, rooms.code, rooms.name AS room_name,
+        rooms.is_testing AS room_is_testing, rooms.created_at AS room_created_at
       FROM teams JOIN rooms ON rooms.id = teams.room_id
       WHERE rooms.code = $1 AND teams.username_key = $2
     `, [code, usernameKey(username)])).rows[0]
@@ -265,7 +280,12 @@ app.post('/api/rooms/:code/teams/login', authLimiter, async (request, response, 
         teamId: team.id,
         username: team.username,
       }),
-      room: { code: team.code, name: team.room_name, createdAt: team.room_created_at },
+      room: {
+        code: team.code,
+        name: team.room_name,
+        createdAt: team.room_created_at,
+        isTesting: Boolean(team.room_is_testing),
+      },
       team: { name: team.name, username: team.username },
       state: { hintRevealed: Boolean(team.hint_revealed_at), solved: Boolean(team.solved_at) },
     })
@@ -286,7 +306,8 @@ app.get('/api/session', requireAuth(), async (request, response, next) => {
     }
 
     const team = (await db.query(`
-      SELECT teams.*, rooms.code, rooms.name AS room_name, rooms.created_at AS room_created_at
+      SELECT teams.*, rooms.code, rooms.name AS room_name,
+        rooms.is_testing AS room_is_testing, rooms.created_at AS room_created_at
       FROM teams JOIN rooms ON rooms.id = teams.room_id
       WHERE teams.id = $1 AND rooms.id = $2
     `, [request.session.teamId, request.session.roomId])).rows[0]
@@ -294,7 +315,12 @@ app.get('/api/session', requireAuth(), async (request, response, next) => {
     if (!team) return response.status(401).json({ error: 'Đội không còn tồn tại.' })
     response.json({
       role: 'team',
-      room: { code: team.code, name: team.room_name, createdAt: team.room_created_at },
+      room: {
+        code: team.code,
+        name: team.room_name,
+        createdAt: team.room_created_at,
+        isTesting: Boolean(team.room_is_testing),
+      },
       team: { name: team.name, username: team.username },
       state: { hintRevealed: Boolean(team.hint_revealed_at), solved: Boolean(team.solved_at) },
     })
@@ -381,7 +407,13 @@ app.post('/api/team/answer', requireAuth('team'), async (request, response, next
     const answer = String(request.body.answer ?? '').slice(0, 160)
     if (!answer) return response.status(400).json({ error: 'Vui lòng nhập đáp án.' })
 
-    const correct = checkAnswer(answer)
+    const room = (await db.query(
+      'SELECT is_testing FROM rooms WHERE id = $1',
+      [request.session.roomId],
+    )).rows[0]
+    if (!room) return response.status(404).json({ error: 'Không tìm thấy phòng.' })
+
+    const correct = room.is_testing ? checkTestingAnswer(answer) : checkAnswer(answer)
     if (!correct) return response.json({ correct: false })
 
     await db.query(`
@@ -396,17 +428,21 @@ app.post('/api/team/answer', requireAuth('team'), async (request, response, next
 
 async function sendProtectedImage(request, response, mode) {
   const team = (await db.query(
-    'SELECT hint_revealed_at, solved_at FROM teams WHERE id = $1 AND room_id = $2',
+    `SELECT teams.hint_revealed_at, teams.solved_at, rooms.is_testing
+     FROM teams JOIN rooms ON rooms.id = teams.room_id
+     WHERE teams.id = $1 AND teams.room_id = $2`,
     [request.session.teamId, request.session.roomId],
   )).rows[0]
   const allowed = mode === 'full' ? team?.solved_at : (team?.hint_revealed_at || team?.solved_at)
   if (!allowed) return response.status(403).json({ error: 'Ảnh này chưa được mở khóa.' })
 
-  response.set({
-    'Cache-Control': 'private, no-store',
-    'Content-Type': 'image/jpeg',
-  })
+  response.set('Cache-Control', 'private, no-store')
 
+  if (team.is_testing) {
+    return response.type('image/svg+xml').send(createTestingPlaceholder(mode))
+  }
+
+  response.type('image/jpeg')
   const selectedImagePath = mode === 'full' ? rewardImagePath : hintImagePath
   return response.sendFile(path.resolve(selectedImagePath))
 }
